@@ -10,16 +10,18 @@ import UIKit
 
 public enum TRMosaicCellType {
     case big
+    case medium
     case small
 }
 
 public protocol TRMosaicLayoutDelegate {
     
-    func collectionView(_ collectionView:UICollectionView, mosaicCellSizeTypeAtIndexPath indexPath:IndexPath) -> TRMosaicCellType
+    /* func collectionView(_ collectionView:UICollectionView, mosaicCellSizeTypeAtIndexPath indexPath:IndexPath) -> TRMosaicCellType */
     
     func collectionView(_ collectionView:UICollectionView, layout collectionViewLayout: TRMosaicLayout, insetAtSection:Int) -> UIEdgeInsets
     
     func heightForSmallMosaicCell() -> CGFloat
+    
 }
 
 open class TRMosaicLayout: UICollectionViewLayout {
@@ -31,16 +33,16 @@ open class TRMosaicLayout: UICollectionViewLayout {
     var cachedCellLayoutAttributes = [IndexPath:UICollectionViewLayoutAttributes]()
     
     let numberOfColumnsInSection = 3
+    let numberOfColumnsMedium = 2
     
     var contentWidth:CGFloat {
         get { return collectionView!.bounds.size.width }
     }
     
-    // MARK: UICollectionViewLayout Implementation
+    // MARK: - UICollectionViewLayout Implementation
     
     override open func prepare() {
         super.prepare()
-        
         resetLayoutState()
         configureMosaicLayout()
     }
@@ -52,19 +54,15 @@ open class TRMosaicLayout: UICollectionViewLayout {
     func configureMosaicLayout() {
         // Queue containing cells that have yet to be added due to column constraints
         var smallCellIndexPathBuffer = [IndexPath]()
+        var mediumCellIndexPathBuffer = [IndexPath]()
         
         var lastBigCellOnLeftSide = false
         // Loops through all items in the first section, this layout has only one section
         for cellIndex in 0..<collectionView!.numberOfItems(inSection: 0) {
             
-            (lastBigCellOnLeftSide, smallCellIndexPathBuffer) = createCellLayout(withIndexPath: cellIndex,
-                                                                                 bigCellSide: lastBigCellOnLeftSide,
-                                                                                 cellBuffer: smallCellIndexPathBuffer)
-        }
-        
-        if !smallCellIndexPathBuffer.isEmpty {
-            addSmallCellLayout(atIndexPath: smallCellIndexPathBuffer[0], atColumn: indexOfShortestColumn())
-            smallCellIndexPathBuffer.removeAll()
+            (lastBigCellOnLeftSide, smallCellIndexPathBuffer, mediumCellIndexPathBuffer) = createCellLayout(withIndexPath: cellIndex,
+                                                                                                            bigCellSide: lastBigCellOnLeftSide,
+                                                                                                            cellBuffer: smallCellIndexPathBuffer, mediumCellBuffer: mediumCellIndexPathBuffer)
         }
     }
     
@@ -74,22 +72,26 @@ open class TRMosaicLayout: UICollectionViewLayout {
      - parameter index:       index path of cell
      - parameter bigCellSide: specifies which side to place big cell
      - parameter cellBuffer:  buffer containing small cell
+     - parameter mediumCellBuffer:  buffer containing medium cell
      
      - returns: tuple containing cellSide and cellBuffer, only one of which will be mutated
      */
-    func createCellLayout(withIndexPath index: Int, bigCellSide: Bool, cellBuffer: [IndexPath]) -> (Bool, [IndexPath]) {
+    func createCellLayout(withIndexPath index: Int, bigCellSide: Bool, cellBuffer: [IndexPath], mediumCellBuffer: [IndexPath]) -> (Bool, [IndexPath], [IndexPath]) {
         let cellIndexPath = IndexPath(item: index, section: 0)
         let cellType:TRMosaicCellType = mosaicCellType(index: cellIndexPath)
         
-        var newBuffer = cellBuffer
+        var newSmallBuffer = cellBuffer
+        var newMediumBuffer = mediumCellBuffer
         var newSide = bigCellSide
         
         if cellType == .big {
             newSide = createBigCellLayout(withIndexPath: cellIndexPath, cellSide: bigCellSide)
+        } else if cellType == .medium {
+            newMediumBuffer = createMediumCellLayout(withIndexPath: cellIndexPath, buffer: newMediumBuffer)
         } else if cellType == .small {
-            newBuffer = createSmallCellLayout(withIndexPath: cellIndexPath, buffer: newBuffer)
+            newSmallBuffer = createSmallCellLayout(withIndexPath: cellIndexPath, buffer: newSmallBuffer)
         }
-        return (newSide, newBuffer)
+        return (newSide, newSmallBuffer, newMediumBuffer)
     }
     
     /**
@@ -102,18 +104,30 @@ open class TRMosaicLayout: UICollectionViewLayout {
     }
     
     /**
+     Creates new layout for the medium cell at specified index path
+     - returns: returns new cell side
+     */
+    func createMediumCellLayout(withIndexPath indexPath:IndexPath, buffer: [IndexPath]) -> [IndexPath] {
+        var newBuffer = buffer
+        newBuffer.append(indexPath)
+        if newBuffer.count >= 2 {
+            addMediumCellLayout(atIndexPath: newBuffer[1], atColumn: 1)
+            newBuffer.removeAll()
+        } else {
+            addMediumCellLayout(atIndexPath: newBuffer[0], atColumn: 0)
+        }
+        return newBuffer
+    }
+    
+    /**
      Creates new layout for the small cell at specified index path
      - returns: returns new cell buffer
      */
     func createSmallCellLayout(withIndexPath indexPath:IndexPath, buffer: [IndexPath]) -> [IndexPath] {
         var newBuffer = buffer
         newBuffer.append(indexPath)
-        if newBuffer.count >= 2 {
-            let column = indexOfShortestColumn()
-            
-            addSmallCellLayout(atIndexPath: newBuffer[0], atColumn: column)
-            addSmallCellLayout(atIndexPath: newBuffer[1], atColumn: column)
-            
+        if newBuffer.count >= 1 {
+            addSmallCellLayout(atIndexPath: newBuffer[0], atColumn: indexOfShortestColumn())
             newBuffer.removeAll()
         }
         return newBuffer
@@ -125,7 +139,7 @@ open class TRMosaicLayout: UICollectionViewLayout {
     override open var collectionViewContentSize: CGSize {
         get {
             
-            let height = columns.smallestColumn.columnHeight
+            let height: CGFloat = columns.biggestColumn.columnHeight
             return CGSize(width: contentWidth, height: height)
         }
     }
@@ -149,7 +163,7 @@ open class TRMosaicLayout: UICollectionViewLayout {
     override open func layoutAttributesForItem(at indexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
         
         return self.cachedCellLayoutAttributes[indexPath]
-
+        
     }
     
     // MARK: Layout
@@ -167,13 +181,25 @@ open class TRMosaicLayout: UICollectionViewLayout {
     }
     
     /**
+     Configures the layout for cell type: Medium
+     Adds the new layout to cache
+     Updates the column heights for each effected column
+     */
+    func addMediumCellLayout(atIndexPath indexPath:IndexPath, atColumn column:Int) {
+        let cellHeight = layoutAttributes(withCellType: .medium, indexPath: indexPath, atColumn: column)
+        columns[column].appendToColumn(withHeight: cellHeight)
+        if column == 1 {
+            columns[column + 1].appendToColumn(withHeight: cellHeight)
+        }
+    }
+    
+    /**
      Configures the layout for cell type: Small
      Adds the new layout to cache
      Updates the column heights for each effected column
      */
     func addSmallCellLayout(atIndexPath indexPath:IndexPath, atColumn column:Int) {
         let cellHeight = layoutAttributes(withCellType: .small, indexPath: indexPath, atColumn: column)
-        
         columns[column].appendToColumn(withHeight: cellHeight)
     }
     
@@ -186,9 +212,9 @@ open class TRMosaicLayout: UICollectionViewLayout {
      
      - returns: new cell height from layout
      */
-    func layoutAttributes(withCellType type:TRMosaicCellType, indexPath:IndexPath, atColumn column:Int) -> CGFloat {
+    func layoutAttributes(withCellType type: TRMosaicCellType, indexPath:IndexPath, atColumn column:Int) -> CGFloat {
         let layoutAttributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
-        let frame = mosaicCellRect(withType: type, atIndexPath: indexPath, atColumn: column)
+        let frame = cellRect(for: type, at: indexPath, column: column)
         
         layoutAttributes.frame = frame
         
@@ -210,22 +236,23 @@ open class TRMosaicLayout: UICollectionViewLayout {
      
      - returns: Bounding rectangle
      */
-    func mosaicCellRect(withType type: TRMosaicCellType, atIndexPath indexPath:IndexPath, atColumn column:Int) -> CGRect {
-        var cellHeight = cellContentHeightFor(mosaicCellType: type)
-        var cellWidth = cellContentWidthFor(mosaicCellType: type)
+    func cellRect(for type: TRMosaicCellType, at indexPath: IndexPath, column: Int) -> CGRect {
+        var mosaicCellHeight = cellHeight(for: type)
+        var mosaicCellWidth = cellWidth(for: type)
         
-        var originX = CGFloat(column) * (contentWidth / CGFloat(numberOfColumnsInSection))
-        var originY = columns[column].columnHeight
+        let numberOfColumns = type != .medium ? numberOfColumnsInSection : numberOfColumnsMedium
+        var originX: CGFloat = CGFloat(column) * (contentWidth / CGFloat(numberOfColumns))
+        var originY: CGFloat = columns[column].columnHeight
         
         let sectionInset = insetForMosaicCell()
         
         originX += sectionInset.left
         originY += sectionInset.top
         
-        cellWidth -= sectionInset.right
-        cellHeight -= sectionInset.bottom
+        mosaicCellWidth -= sectionInset.right
+        mosaicCellHeight -= sectionInset.bottom
         
-        return CGRect(x: originX, y: originY, width: cellWidth, height: cellHeight)
+        return CGRect(x: originX, y: originY, width: mosaicCellWidth, height: mosaicCellHeight)
     }
     
     /**
@@ -235,12 +262,16 @@ open class TRMosaicLayout: UICollectionViewLayout {
      
      - returns: Calculated height
      */
-    func cellContentHeightFor(mosaicCellType cellType:TRMosaicCellType) -> CGFloat {
+    func cellHeight(for mosaic: TRMosaicCellType) -> CGFloat {
         let height = delegate.heightForSmallMosaicCell()
-        if cellType == .big {
+        switch mosaic {
+        case .small:
+            return height
+        case .medium:
+            return height * 1.5
+        default:
             return height * 2
         }
-        return height
     }
     
     /**
@@ -250,12 +281,15 @@ open class TRMosaicLayout: UICollectionViewLayout {
      
      - returns: Calculated width
      */
-    func cellContentWidthFor(mosaicCellType cellType:TRMosaicCellType) -> CGFloat {
-        let width = contentWidth / 3
-        if cellType == .big {
-            return width * 2
+    func cellWidth(for mosaic: TRMosaicCellType) -> CGFloat {
+        switch mosaic {
+        case .small:
+            return contentWidth / 3
+        case .medium:
+            return contentWidth / 2
+        default:
+            return (contentWidth / 3) * 2
         }
-        return width
     }
     
     // MARK: Orientation
@@ -280,11 +314,13 @@ open class TRMosaicLayout: UICollectionViewLayout {
     
     /**
      Returns the cell type for the specified cell at index path
+     You can also use the delegate method:
+     delegate.collectionView(collectionView!, mosaicCellSizeTypeAtIndexPath:indexPath)
      
      - returns: Cell type
      */
-    func mosaicCellType(index indexPath:IndexPath) -> TRMosaicCellType {
-        return delegate.collectionView(collectionView!, mosaicCellSizeTypeAtIndexPath:indexPath)
+    func mosaicCellType(index indexPath: IndexPath) -> TRMosaicCellType {
+        return TRRandomSize.getRandomMosaic(at: indexPath)
     }
     
     /**
@@ -303,11 +339,8 @@ extension TRMosaicLayout {
      - returns: The index of the column with the smallest height
      */
     func indexOfShortestColumn() -> Int {
-        var index = 0
-        for i in 1..<numberOfColumnsInSection {
-            if columns[i] < columns[index] {
-                index = i
-            }
+        guard let min = columns.columns.min(), let index = columns.columns.index(of: min) else {
+            return 0
         }
         return index
     }

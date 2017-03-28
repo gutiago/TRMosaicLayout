@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
   # s.screenshots     = 'www.example.com/screenshots_1', 'www.example.com/screenshots_2'
   s.license          = { :type => 'MIT', :file => 'LICENSE' }
   s.author           = { 'Vincent Le' => 'vinnyoodles@gmail.com' }
-  s.source           = { :git => 'https://github.com/vinnyoodles/TRMosaicLayout.git', :tag => s.version.to_s }
+  s.source           = { :git => 'https://github.com/gutiago/TRMosaicLayout.git', :tag => s.version.to_s }
 
   s.ios.deployment_target = '9.0'
 

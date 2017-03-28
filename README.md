@@ -98,22 +98,6 @@ extension TRCollectionViewController: TRMosaicLayoutDelegate {
 * Make sure you set the delegate of `TRMosaicLayout` to your `collectionViewController`
 * `mosaicLayout.delegate = self`
 
-**Something else isn't working properly**
-* Use github's issue reporter on the right, this will you be your best bet as I'm on Github fairly regularly
-* Send me an email vinnyoodles@gmail.com
-
-## Release History
-  * 1.0.0 Update to Swift 3
-  * 0.1.0 First release on CocoaPods
-
-## Contributions
-
-  I am happy to accept any open contributions. Just fork this project, make the changes and submit a pull request.
-
-## Author
-
-  Vincent Le, vinnyoodles@gmail.com
-
 ## License
 
   TRMosaicLayout is available under the ```MIT``` license. See the ```LICENSE``` file for more info.
